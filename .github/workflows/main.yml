@@ -18,5 +18,5 @@ jobs:
           rollbackonhealthcheckfailed: true
         env:
           HD_DATABASE_URL: ${{secrets.DATABASE_URL}}
-          HD_MQTT_BROCKER: ${{secrets.MQTT_BROCKER}}
+          HD_MQTT_BROKER: ${{secrets.MQTT_BROKER}}
           HD_PORT: ${{secrets.PORT}}
