@@ -29,29 +29,49 @@ mqttClient.on("message", function (topic, message) {
   const payload = JSON.parse(message.toString());
   if (topic === "store_and_send") {
     if (
-      !("bakset_id" in payload) ||
+      !("basket_id" in payload) ||
       !("category" in payload) ||
       !("waste_height" in payload)
     )
       return;
     pool.connect().then(async (client) => {
-      let current_section_level = 0;
+      let current_section_level = 0,
+        current_basket_level = 0,
+        sections_height = 0,
+        current_section_wastes_height = 0,
+        sections_wastes_height = 0,
+        width = 1,
+        length = 1;
       try {
         await client.query("BEGIN");
         const basket = await client.query(
-          "SELECT fullness_level, length, width from basket_section where basket_id = $1 AND category = $2 ;",
-          [payload.basket_id, payload.category]
+          "SELECT category, wastes_height, height, length, width from basket_section where basket_id = $1 ;",
+          [payload.basket_id]
         );
-        const { fullness_level, length, width } = basket.rows[0];
-        current_section_level = fullness_level + payload.waste_height;
+        for (const section of basket.rows) {
+          sections_height += section.height;
+          if (section.category === payload.category) {
+            current_section_wastes_height =
+              section.wastes_height + payload.waste_height;
+            sections_wastes_height += current_section_wastes_height;
+            current_section_level =
+              (current_section_wastes_height * 100) / section.height;
+            width = section.width;
+            length = section.length;
+          } else {
+            sections_wastes_height += section.wastes_height;
+          }
+        }
+        console.log("basket height", sections_height);
+        console.log("sections wastes height", sections_wastes_height);
 
         await client.query(
-          "UPDATE basket_section set fullness_level = $1 WHERE  category = $2 AND basket_id = $3 ;",
-          [
-            fullness_level + payload.waste_height,
-            payload.category,
-            payload.basket_id,
-          ]
+          "UPDATE basket_section set wastes_height = $1 WHERE  category = $2 AND basket_id = $3 ;",
+          [current_section_wastes_height, payload.category, payload.basket_id]
+        );
+        await client.query(
+          "UPDATE baskets set wastes_height = $1 WHERE id = $2 ;",
+          [sections_wastes_height, payload.basket_id]
         );
         await client.query(
           "INSERT INTO wastes(height, size, basket_id, category) VALUES ($1, $2, $3, $4);",
@@ -65,11 +85,13 @@ mqttClient.on("message", function (topic, message) {
         await client.query("COMMIT");
         client.release();
         if (current_section_level > 90) {
+          current_basket_level =
+            (sections_wastes_height * 100) / sections_height;
           io.emit("notification", {
             title: "basket #" + payload.basket_id,
             primary:
               payload.category + " Section ---  " + current_section_level + "%",
-            secondary: "and the total basket level is 70% please take action",
+            secondary: `and the total basket level is ${current_basket_level}% please take action`,
           });
         }
       } catch (err_1) {
@@ -79,6 +101,7 @@ mqttClient.on("message", function (topic, message) {
     });
 
     payload.date = new Date().getTime() / 1000;
+    console.log("payload", payload);
     io.emit("add-wastes", { wastes: payload });
   }
   if (topic === "update_status") console.log(message.toString());
